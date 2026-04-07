@@ -11,8 +11,12 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# 兼容 Windows CRLF：加载前去除 \r，避免 source 后变量污染
+TMP_CONFIG="$(mktemp)"
+trap 'rm -f "$TMP_CONFIG"' EXIT
+tr -d '\r' < "$CONFIG_FILE" > "$TMP_CONFIG"
 # shellcheck disable=SC1090
-source "$CONFIG_FILE"
+source "$TMP_CONFIG"
 
 # 可选开关默认值
 AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-true}"
@@ -149,9 +153,21 @@ ensure_sshpass() {
 }
 
 # 1. 获取用户输入的端口（支持多组，空格或逗号分隔）
+REMOTE_USER="$(strip_cr "${REMOTE_USER:-}")"
+REMOTE_HOST="$(strip_cr "${REMOTE_HOST:-}")"
+REMOTE_SSH_PORT="$(strip_cr "${REMOTE_SSH_PORT:-}")"
+SSH_PASSWORD="$(strip_cr "${SSH_PASSWORD:-}")"
+DEFAULT_REMOTE_PORTS="$(strip_cr "$DEFAULT_REMOTE_PORTS")"
+AUTO_OPEN_BROWSER="$(strip_cr "$AUTO_OPEN_BROWSER")"
+ENABLE_MINI_GAME="$(strip_cr "$ENABLE_MINI_GAME")"
+
+if [ -z "$REMOTE_USER" ] || [ -z "$REMOTE_HOST" ]; then
+    echo "❌ 错误：REMOTE_USER 或 REMOTE_HOST 为空，请检查 config.conf。"
+    exit 1
+fi
+
 read -r -p "请输入要映射的远程端口（可多组，空格/逗号分隔）[默认 $DEFAULT_REMOTE_PORTS]: " INPUT_PORTS
 RAW_PORTS="${INPUT_PORTS:-$DEFAULT_REMOTE_PORTS}"
-REMOTE_SSH_PORT="$(strip_cr "${REMOTE_SSH_PORT:-}")"
 RAW_PORTS="$(strip_cr "$RAW_PORTS")"
 
 if ! is_valid_port "$REMOTE_SSH_PORT"; then

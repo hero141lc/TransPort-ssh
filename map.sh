@@ -23,6 +23,8 @@ AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-true}"
 ENABLE_MINI_GAME="${ENABLE_MINI_GAME:-true}"
 DEFAULT_REMOTE_PORTS="${DEFAULT_REMOTE_PORTS:-5173}"
 AUTO_RECONNECT="${AUTO_RECONNECT:-true}"
+RECONNECT_MAX_RETRIES="${RECONNECT_MAX_RETRIES:-5}"
+RECONNECT_BACKOFF_SEC="${RECONNECT_BACKOFF_SEC:-3}"
 
 is_valid_port() {
     local p="$1"
@@ -161,6 +163,9 @@ SSH_PASSWORD="$(strip_cr "${SSH_PASSWORD:-}")"
 DEFAULT_REMOTE_PORTS="$(strip_cr "$DEFAULT_REMOTE_PORTS")"
 AUTO_OPEN_BROWSER="$(strip_cr "$AUTO_OPEN_BROWSER")"
 ENABLE_MINI_GAME="$(strip_cr "$ENABLE_MINI_GAME")"
+AUTO_RECONNECT="$(strip_cr "$AUTO_RECONNECT")"
+RECONNECT_MAX_RETRIES="$(strip_cr "$RECONNECT_MAX_RETRIES")"
+RECONNECT_BACKOFF_SEC="$(strip_cr "$RECONNECT_BACKOFF_SEC")"
 
 if [ -z "$REMOTE_USER" ] || [ -z "$REMOTE_HOST" ]; then
     echo "❌ 错误：REMOTE_USER 或 REMOTE_HOST 为空，请检查 config.conf。"
@@ -173,6 +178,14 @@ RAW_PORTS="$(strip_cr "$RAW_PORTS")"
 
 if ! is_valid_port "$REMOTE_SSH_PORT"; then
     echo "❌ 错误：配置中的 REMOTE_SSH_PORT='$REMOTE_SSH_PORT' 非法。"
+    exit 1
+fi
+if ! [[ "$RECONNECT_MAX_RETRIES" =~ ^[0-9]+$ ]]; then
+    echo "❌ 错误：RECONNECT_MAX_RETRIES 必须是非负整数。"
+    exit 1
+fi
+if ! [[ "$RECONNECT_BACKOFF_SEC" =~ ^[0-9]+$ ]]; then
+    echo "❌ 错误：RECONNECT_BACKOFF_SEC 必须是非负整数。"
     exit 1
 fi
 
@@ -188,6 +201,7 @@ declare -a VALID_REMOTE_PORTS
 declare -a MAPPED_LOCAL_PORTS
 declare -a LINKS
 declare -a SSH_PIDS
+declare -a RECONNECT_COUNTS
 
 # 2. 端口校验 + 动态分配本地端口
 for remote_port in "${REMOTE_PORT_LIST[@]}"; do
@@ -263,6 +277,7 @@ start_tunnel() {
 
 for idx in "${!VALID_REMOTE_PORTS[@]}"; do
     start_tunnel "$idx"
+    RECONNECT_COUNTS[$idx]=0
 done
 
 sleep 1
@@ -294,7 +309,18 @@ while true; do
         pid="${SSH_PIDS[$idx]}"
         if ! kill -0 "$pid" >/dev/null 2>&1; then
             if [ "$AUTO_RECONNECT" = "true" ]; then
-                echo "⚠️ 隧道中断，正在重连: 远程 ${VALID_REMOTE_PORTS[$idx]} -> 本地 ${MAPPED_LOCAL_PORTS[$idx]}"
+                retry_count="${RECONNECT_COUNTS[$idx]:-0}"
+                if [ "$retry_count" -ge "$RECONNECT_MAX_RETRIES" ]; then
+                    echo "❌ 隧道重连次数已达上限(${RECONNECT_MAX_RETRIES})，停止重连。"
+                    echo "💡 服务器在握手后主动断开，通常是服务端策略导致（如禁止端口转发/会话策略）。"
+                    echo "💡 可在服务器检查 sshd_config: AllowTcpForwarding、PermitOpen、ForceCommand。"
+                    cleanup
+                    exit 1
+                fi
+                retry_count=$((retry_count + 1))
+                RECONNECT_COUNTS[$idx]="$retry_count"
+                echo "⚠️ 隧道中断，${RECONNECT_BACKOFF_SEC}s 后重连 (${retry_count}/${RECONNECT_MAX_RETRIES}): 远程 ${VALID_REMOTE_PORTS[$idx]} -> 本地 ${MAPPED_LOCAL_PORTS[$idx]}"
+                sleep "$RECONNECT_BACKOFF_SEC"
                 start_tunnel "$idx"
             else
                 echo "❌ 隧道已中断，AUTO_RECONNECT=false，脚本退出。"

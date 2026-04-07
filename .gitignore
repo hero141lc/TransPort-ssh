@@ -1,0 +1,34 @@
+# =========================
+# Sensitive local configs
+# =========================
+config.conf
+*.local.conf
+.env
+.env.*
+!.env.example
+
+# SSH / keys / certificates
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+known_hosts
+
+# Logs
+*.log
+logs/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp

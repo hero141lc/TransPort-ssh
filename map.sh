@@ -235,7 +235,14 @@ show_spinner "校验配置与端口策略"
 run_mini_game
 show_spinner "建立 SSH 隧道"
 
+STOP_REQUESTED=false
+CLEANED_UP=false
+
 cleanup() {
+    if [ "$CLEANED_UP" = "true" ]; then
+        return
+    fi
+    CLEANED_UP=true
     local pid
     for pid in "${SSH_PIDS[@]:-}"; do
         if kill -0 "$pid" >/dev/null 2>&1; then
@@ -245,7 +252,14 @@ cleanup() {
     echo ""
     echo "🛑 映射已停止。"
 }
-trap cleanup INT TERM
+
+on_interrupt() {
+    STOP_REQUESTED=true
+    AUTO_RECONNECT=false
+    cleanup
+    exit 130
+}
+trap on_interrupt INT TERM
 
 USE_SSHPASS=false
 if [ -n "${SSH_PASSWORD:-}" ] && ensure_sshpass; then
@@ -304,8 +318,14 @@ fi
 echo "🚀 ${#SSH_PIDS[@]} 组隧道运行中，按 Ctrl + C 结束。"
 
 while true; do
+    if [ "$STOP_REQUESTED" = "true" ]; then
+        break
+    fi
     sleep 2
     for idx in "${!SSH_PIDS[@]}"; do
+        if [ "$STOP_REQUESTED" = "true" ]; then
+            break
+        fi
         pid="${SSH_PIDS[$idx]}"
         if ! kill -0 "$pid" >/dev/null 2>&1; then
             if [ "$AUTO_RECONNECT" = "true" ]; then
@@ -321,7 +341,9 @@ while true; do
                 RECONNECT_COUNTS[$idx]="$retry_count"
                 echo "⚠️ 隧道中断，${RECONNECT_BACKOFF_SEC}s 后重连 (${retry_count}/${RECONNECT_MAX_RETRIES}): 远程 ${VALID_REMOTE_PORTS[$idx]} -> 本地 ${MAPPED_LOCAL_PORTS[$idx]}"
                 sleep "$RECONNECT_BACKOFF_SEC"
-                start_tunnel "$idx"
+                if [ "$STOP_REQUESTED" = "false" ]; then
+                    start_tunnel "$idx"
+                fi
             else
                 echo "❌ 隧道已中断，AUTO_RECONNECT=false，脚本退出。"
                 cleanup

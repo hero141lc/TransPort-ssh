@@ -49,6 +49,23 @@ is_forbidden_port() {
     return 1
 }
 
+strip_cr() {
+    local v="$1"
+    printf "%s" "${v//$'\r'/}"
+}
+
+port_exists_in_array() {
+    local target="$1"
+    shift
+    local item
+    for item in "$@"; do
+        if [ "$item" = "$target" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 pick_local_port() {
     local remote_port="$1"
     local candidate="$remote_port"
@@ -57,7 +74,7 @@ pick_local_port() {
             echo "❌ 错误：无法为远程端口 $remote_port 分配可用本地端口。"
             return 1
         fi
-        if [ -n "${ASSIGNED_LOCAL_PORTS[$candidate]:-}" ]; then
+        if port_exists_in_array "$candidate" "${MAPPED_LOCAL_PORTS[@]:-}"; then
             candidate=$((candidate + 1))
             continue
         fi
@@ -65,7 +82,6 @@ pick_local_port() {
             candidate=$((candidate + 1))
             continue
         fi
-        ASSIGNED_LOCAL_PORTS["$candidate"]=1
         echo "$candidate"
         return 0
     done
@@ -135,6 +151,8 @@ ensure_sshpass() {
 # 1. 获取用户输入的端口（支持多组，空格或逗号分隔）
 read -r -p "请输入要映射的远程端口（可多组，空格/逗号分隔）[默认 $DEFAULT_REMOTE_PORTS]: " INPUT_PORTS
 RAW_PORTS="${INPUT_PORTS:-$DEFAULT_REMOTE_PORTS}"
+REMOTE_SSH_PORT="$(strip_cr "${REMOTE_SSH_PORT:-}")"
+RAW_PORTS="$(strip_cr "$RAW_PORTS")"
 
 if ! is_valid_port "$REMOTE_SSH_PORT"; then
     echo "❌ 错误：配置中的 REMOTE_SSH_PORT='$REMOTE_SSH_PORT' 非法。"
@@ -149,8 +167,6 @@ if [ "${#REMOTE_PORT_LIST[@]}" -eq 0 ]; then
     exit 1
 fi
 
-declare -A REMOTE_PORT_SEEN
-declare -A ASSIGNED_LOCAL_PORTS
 declare -a VALID_REMOTE_PORTS
 declare -a MAPPED_LOCAL_PORTS
 declare -a LINKS
@@ -158,6 +174,7 @@ declare -a SSH_PIDS
 
 # 2. 端口校验 + 动态分配本地端口
 for remote_port in "${REMOTE_PORT_LIST[@]}"; do
+    remote_port="$(strip_cr "$remote_port")"
     if ! is_valid_port "$remote_port"; then
         echo "❌ 错误：端口 '$remote_port' 非法，请输入 1~65535 的整数。"
         exit 1
@@ -166,10 +183,9 @@ for remote_port in "${REMOTE_PORT_LIST[@]}"; do
         echo "❌ 错误：端口 $remote_port 是受限的危险端口，禁止映射。"
         exit 1
     fi
-    if [ -n "${REMOTE_PORT_SEEN[$remote_port]:-}" ]; then
+    if port_exists_in_array "$remote_port" "${VALID_REMOTE_PORTS[@]:-}"; then
         continue
     fi
-    REMOTE_PORT_SEEN["$remote_port"]=1
 
     local_port="$(pick_local_port "$remote_port")" || exit 1
     VALID_REMOTE_PORTS+=("$remote_port")

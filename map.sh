@@ -22,6 +22,7 @@ source "$TMP_CONFIG"
 AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-true}"
 ENABLE_MINI_GAME="${ENABLE_MINI_GAME:-true}"
 DEFAULT_REMOTE_PORTS="${DEFAULT_REMOTE_PORTS:-5173}"
+AUTO_RECONNECT="${AUTO_RECONNECT:-true}"
 
 is_valid_port() {
     local p="$1"
@@ -240,15 +241,28 @@ else
     echo "🔑 将使用手动输入密码连接。"
 fi
 
-for idx in "${!VALID_REMOTE_PORTS[@]}"; do
-    remote_port="${VALID_REMOTE_PORTS[$idx]}"
-    local_port="${MAPPED_LOCAL_PORTS[$idx]}"
-    SSH_CMD=(ssh -N -L "$local_port:localhost:$remote_port" "$REMOTE_USER@$REMOTE_HOST" -p "$REMOTE_SSH_PORT")
+start_tunnel() {
+    local idx="$1"
+    local remote_port="${VALID_REMOTE_PORTS[$idx]}"
+    local local_port="${MAPPED_LOCAL_PORTS[$idx]}"
+    local cmd=(ssh -N \
+        -o ServerAliveInterval=20 \
+        -o ServerAliveCountMax=3 \
+        -o ExitOnForwardFailure=yes \
+        -L "$local_port:localhost:$remote_port" \
+        "$REMOTE_USER@$REMOTE_HOST" \
+        -p "$REMOTE_SSH_PORT")
+
     if [ "$USE_SSHPASS" = "true" ]; then
-        SSH_CMD=(sshpass -p "$SSH_PASSWORD" "${SSH_CMD[@]}")
+        cmd=(sshpass -p "$SSH_PASSWORD" "${cmd[@]}")
     fi
-    "${SSH_CMD[@]}" &
-    SSH_PIDS+=("$!")
+
+    "${cmd[@]}" &
+    SSH_PIDS[$idx]="$!"
+}
+
+for idx in "${!VALID_REMOTE_PORTS[@]}"; do
+    start_tunnel "$idx"
 done
 
 sleep 1
@@ -273,4 +287,20 @@ if [ "$AUTO_OPEN_BROWSER" = "true" ]; then
 fi
 
 echo "🚀 ${#SSH_PIDS[@]} 组隧道运行中，按 Ctrl + C 结束。"
-wait
+
+while true; do
+    sleep 2
+    for idx in "${!SSH_PIDS[@]}"; do
+        pid="${SSH_PIDS[$idx]}"
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            if [ "$AUTO_RECONNECT" = "true" ]; then
+                echo "⚠️ 隧道中断，正在重连: 远程 ${VALID_REMOTE_PORTS[$idx]} -> 本地 ${MAPPED_LOCAL_PORTS[$idx]}"
+                start_tunnel "$idx"
+            else
+                echo "❌ 隧道已中断，AUTO_RECONNECT=false，脚本退出。"
+                cleanup
+                exit 1
+            fi
+        fi
+    done
+done

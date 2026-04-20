@@ -25,6 +25,7 @@ DEFAULT_REMOTE_PORTS="${DEFAULT_REMOTE_PORTS:-5173}"
 AUTO_RECONNECT="${AUTO_RECONNECT:-true}"
 RECONNECT_MAX_RETRIES="${RECONNECT_MAX_RETRIES:-5}"
 RECONNECT_BACKOFF_SEC="${RECONNECT_BACKOFF_SEC:-3}"
+DEFAULT_SERVER_INDEX="${DEFAULT_SERVER_INDEX:-1}"
 
 is_valid_port() {
     local p="$1"
@@ -166,8 +167,55 @@ ENABLE_MINI_GAME="$(strip_cr "$ENABLE_MINI_GAME")"
 AUTO_RECONNECT="$(strip_cr "$AUTO_RECONNECT")"
 RECONNECT_MAX_RETRIES="$(strip_cr "$RECONNECT_MAX_RETRIES")"
 RECONNECT_BACKOFF_SEC="$(strip_cr "$RECONNECT_BACKOFF_SEC")"
+DEFAULT_SERVER_INDEX="$(strip_cr "$DEFAULT_SERVER_INDEX")"
 
-if [ -z "$REMOTE_USER" ] || [ -z "$REMOTE_HOST" ]; then
+select_server() {
+    SERVER_LABEL="默认服务器"
+    SERVER_NOTE="未设置备注"
+
+    if [ "${#SERVERS[@]}" -eq 0 ]; then
+        # 兼容旧配置：未配置 SERVERS 时使用单服务器字段
+        return 0
+    fi
+
+    if ! [[ "$DEFAULT_SERVER_INDEX" =~ ^[0-9]+$ ]] || [ "$DEFAULT_SERVER_INDEX" -lt 1 ] || [ "$DEFAULT_SERVER_INDEX" -gt "${#SERVERS[@]}" ]; then
+        DEFAULT_SERVER_INDEX=1
+    fi
+
+    echo "🗂️ 请选择要连接的服务器:"
+    local i entry name note user host ssh_port
+    for ((i=1; i<=${#SERVERS[@]}; i++)); do
+        entry="$(strip_cr "${SERVERS[$((i-1))]}")"
+        IFS='|' read -r name note user host ssh_port _ <<< "$entry"
+        name="$(strip_cr "${name:-服务器$i}")"
+        note="$(strip_cr "${note:-无备注}")"
+        user="$(strip_cr "${user:-}")"
+        host="$(strip_cr "${host:-}")"
+        ssh_port="$(strip_cr "${ssh_port:-}")"
+        echo "  [$i] $name - $note (${user}@${host}:${ssh_port})"
+    done
+
+    read -r -p "输入序号 [默认 $DEFAULT_SERVER_INDEX]: " SERVER_INPUT
+    SERVER_INPUT="$(strip_cr "${SERVER_INPUT:-}")"
+    SERVER_INDEX="${SERVER_INPUT:-$DEFAULT_SERVER_INDEX}"
+    if ! [[ "$SERVER_INDEX" =~ ^[0-9]+$ ]] || [ "$SERVER_INDEX" -lt 1 ] || [ "$SERVER_INDEX" -gt "${#SERVERS[@]}" ]; then
+        echo "❌ 错误：无效服务器序号 '$SERVER_INDEX'。"
+        exit 1
+    fi
+
+    entry="$(strip_cr "${SERVERS[$((SERVER_INDEX-1))]}")"
+    IFS='|' read -r SERVER_LABEL SERVER_NOTE REMOTE_USER REMOTE_HOST REMOTE_SSH_PORT SSH_PASSWORD <<< "$entry"
+    SERVER_LABEL="$(strip_cr "${SERVER_LABEL:-服务器$SERVER_INDEX}")"
+    SERVER_NOTE="$(strip_cr "${SERVER_NOTE:-无备注}")"
+    REMOTE_USER="$(strip_cr "${REMOTE_USER:-}")"
+    REMOTE_HOST="$(strip_cr "${REMOTE_HOST:-}")"
+    REMOTE_SSH_PORT="$(strip_cr "${REMOTE_SSH_PORT:-}")"
+    SSH_PASSWORD="$(strip_cr "${SSH_PASSWORD:-}")"
+}
+
+select_server
+
+if [ -z "${REMOTE_USER:-}" ] || [ -z "${REMOTE_HOST:-}" ]; then
     echo "❌ 错误：REMOTE_USER 或 REMOTE_HOST 为空，请检查 config.conf。"
     exit 1
 fi
@@ -225,6 +273,8 @@ for remote_port in "${REMOTE_PORT_LIST[@]}"; do
 done
 
 # 链接固定显示在最上方（多组）
+echo "🖥️ 当前服务器: ${SERVER_LABEL:-默认服务器} (${SERVER_NOTE:-无备注})"
+echo "🔗 SSH 目标: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_SSH_PORT}"
 echo "🌐 本地访问链接（固定）:"
 for link in "${LINKS[@]}"; do
     echo "  - $link"

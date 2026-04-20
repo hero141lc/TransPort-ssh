@@ -7,15 +7,14 @@
 ## 文件说明
 
 - `config.conf`：连接参数与端口策略配置
-- `map.sh`：执行映射的主脚本
+- `map.command`：执行映射的主脚本（macOS 双击可运行）
 
 ## 快速开始
 
 1. 编辑配置文件（按需修改）：
-   - `REMOTE_USER`
-   - `REMOTE_HOST`
-   - `REMOTE_SSH_PORT`
-   - `SSH_PASSWORD`
+   - `SERVERS`（推荐，多服务器）
+   - `DEFAULT_SERVER_INDEX`
+   - `REMOTE_USER` / `REMOTE_HOST` / `REMOTE_SSH_PORT` / `SSH_PASSWORD`（兼容旧版单服务器）
    - `DEFAULT_REMOTE_PORTS`
    - `AUTO_OPEN_BROWSER`
    - `ENABLE_MINI_GAME`
@@ -26,13 +25,14 @@
    ```
 3. 运行脚本：
    ```bash
-   ./map.sh
+   ./map.command
    ```
 4. 成功后访问：
    - 脚本顶部输出的链接列表（多组端口会有多条链接）
 
 ## 行为说明
 
+- 启动后会先列出服务器清单，按序号选择目标服务器，支持备注显示。
 - 回车不输入端口时，使用 `DEFAULT_REMOTE_PORTS`（支持多端口，空格或逗号分隔）。
 - 支持一次映射多组端口（如：`5173, 8080 3000`）。
 - 如果输入端口位于 `FORBIDDEN_PORTS` 中，脚本会立即终止。
